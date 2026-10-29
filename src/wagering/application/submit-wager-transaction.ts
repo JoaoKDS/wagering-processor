@@ -242,6 +242,17 @@ function toPayload(input: SubmitInput): WagerPayload {
   if (!input.idempotencyKey || input.idempotencyKey.trim() === "") {
     throw new InvalidSubmissionError("header Idempotency-Key é obrigatório");
   }
+  const required: Array<[string, unknown]> = [
+    ["providerId", input.providerId],
+    ["externalTransactionId", input.externalTransactionId],
+    ["roundId", input.roundId],
+    ["gameId", input.gameId],
+  ];
+  for (const [field, value] of required) {
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new InvalidSubmissionError(`${field} obrigatório`);
+    }
+  }
   if (!UUID_RE.test(input.walletId) || !UUID_RE.test(input.playerId)) {
     throw new InvalidSubmissionError("walletId e playerId devem ser UUID");
   }
