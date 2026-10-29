@@ -14,6 +14,7 @@ import {
 import {
   type Conn,
   transactionConn,
+  query,
   type WagerTxRow,
   findByExternalId,
   findByIdempotencyKey,
@@ -85,12 +86,39 @@ export class SubmitWagerTransaction {
   ) {}
 
   async execute(input: SubmitInput): Promise<SubmitResult> {
+    const outcome = await this.run(input, undefined);
+    if (outcome === "DUPLICATE") throw new Error("inbox sem messageId não deveria devolver DUPLICATE");
+    return outcome;
+  }
+
+  /**
+   * Caminho da fila. A inbox (consumerName, messageId) é gravada NA MESMA transação da aplicação:
+   * se a mensagem já foi processada, devolve DUPLICATE e nada muda. O ack só acontece após o commit.
+   */
+  async executeFromQueue(input: SubmitInput, messageId: string): Promise<SubmitResult | "DUPLICATE"> {
+    return this.run(input, messageId);
+  }
+
+  private async run(input: SubmitInput, messageId: string | undefined): Promise<SubmitResult | "DUPLICATE"> {
     const payload = toPayload(input);
     const payloadHash = WagerTransaction.computePayloadHash(payload);
+    const now = this.clock();
 
-    return this.orm.em.fork().transactional(async (tx) =>
-      this.apply(transactionConn(tx), input.idempotencyKey, payload, payloadHash, this.clock()),
-    );
+    return this.orm.em.fork().transactional(async (tx) => {
+      const conn = transactionConn(tx);
+      if (messageId !== undefined) {
+        const fresh = await query<{ message_id: string }>(
+          conn,
+          `INSERT INTO inbox_messages (consumer_name, message_id, payload_hash, received_at, processed_at)
+           VALUES ('wager-consumer', ?, ?, ?, ?)
+           ON CONFLICT DO NOTHING
+           RETURNING message_id`,
+          [messageId, payloadHash, now, now],
+        );
+        if (fresh.length === 0) return "DUPLICATE" as const;
+      }
+      return this.apply(conn, input.idempotencyKey, payload, payloadHash, now);
+    });
   }
 
   private async apply(
@@ -207,7 +235,7 @@ function needsReference(txn: WagerTransaction): boolean {
  * Aplica REFUND ou ROLLBACK (ou WIN com referência). Lança ReferenceRuleError se a regra não passar.
  * Não altera a carteira se lançar, porque as validações rodam antes de qualquer débito ou crédito.
  */
-async function applyReversal(
+export async function applyReversal(
   conn: Conn,
   wallet: Wallet,
   txn: WagerTransaction,
