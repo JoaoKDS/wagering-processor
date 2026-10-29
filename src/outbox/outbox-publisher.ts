@@ -1,5 +1,5 @@
 import type { MikroORM } from "@mikro-orm/postgresql";
-import { type Conn, query, run } from "../wagering/infrastructure/ledger-store";
+import { query, run, transactionConn } from "../wagering/infrastructure/ledger-store";
 
 export interface OutboxEvent {
   id: string;
@@ -33,7 +33,7 @@ export class OutboxPublisher {
   async publishBatch(): Promise<number> {
     return this.orm.em.fork().transactional(async (tx) => {
       // conexão DA transação: sem isso o FOR UPDATE SKIP LOCKED não segura nada
-      const conn = tx.getKnex() as unknown as Conn;
+      const conn = transactionConn(tx);
       const events = await query<OutboxEvent>(
         conn,
         `SELECT id, aggregate_id, event_type, payload, occurred_at, attempts

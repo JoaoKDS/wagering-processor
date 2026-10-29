@@ -20,6 +20,16 @@ export interface Conn {
   raw(sql: string, bindings?: unknown[]): Promise<{ rows?: unknown[] }>;
 }
 
+/**
+ * Conexão da transação ativa do MikroORM. Falha se não houver transação, para nunca
+ * rodar uma query de escrita em autocommit por engano.
+ */
+export function transactionConn(em: { getTransactionContext(): unknown }): Conn {
+  const trx = em.getTransactionContext();
+  if (!trx) throw new Error("query de escrita fora de transação");
+  return trx as Conn;
+}
+
 /** SELECT ou UPDATE ... RETURNING: devolve as linhas. */
 export async function query<T>(conn: Conn, sql: string, params: unknown[] = []): Promise<T[]> {
   const result = await conn.raw(sql, params);

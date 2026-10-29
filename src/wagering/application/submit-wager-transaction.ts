@@ -13,6 +13,7 @@ import {
 } from "../domain/wager-transaction";
 import {
   type Conn,
+  transactionConn,
   type WagerTxRow,
   findByExternalId,
   findByIdempotencyKey,
@@ -88,8 +89,7 @@ export class SubmitWagerTransaction {
     const payloadHash = WagerTransaction.computePayloadHash(payload);
 
     return this.orm.em.fork().transactional(async (tx) =>
-      // getKnex() devolve a conexão DA transação; getConnection() não estaria no BEGIN
-      this.apply(tx.getKnex() as unknown as Conn, input.idempotencyKey, payload, payloadHash, this.clock()),
+      this.apply(transactionConn(tx), input.idempotencyKey, payload, payloadHash, this.clock()),
     );
   }
 
