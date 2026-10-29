@@ -54,7 +54,7 @@ while (running) {
     }
   } catch (err) {
     log("poll_error", { message: String(err) });
-    await Bun.sleep(2000);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
 }
 
