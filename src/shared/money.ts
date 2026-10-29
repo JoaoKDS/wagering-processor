@@ -40,6 +40,16 @@ export class Money {
     return Money.build(props, false);
   }
 
+  /** Reconstrói a partir de centavos já persistidos (ex.: bigint vindo do banco). */
+  static fromMinor(minor: bigint, currency: string): Money {
+    assertCurrency(currency);
+    return new Money(minor, currency);
+  }
+
+  toMinor(): bigint {
+    return this.minor;
+  }
+
   static zero(currency: string): Money {
     assertCurrency(currency);
     return new Money(0n, currency);

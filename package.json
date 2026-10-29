@@ -11,6 +11,10 @@
     "migrate:down": "bun scripts/migrate.ts down",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@mikro-orm/core": "^6.4.0",
+    "@mikro-orm/postgresql": "^6.4.0"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/node": "^22.0.0",
