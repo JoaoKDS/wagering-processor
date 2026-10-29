@@ -17,6 +17,12 @@ export function createSqs(): SQSClient {
   });
 }
 
+/** Fila padrão de eventos de integração (publicada pelo outbox). */
+export async function ensureEventsQueue(sqs: SQSClient, name = "wager-events"): Promise<string> {
+  const res = await sqs.send(new CreateQueueCommand({ QueueName: name }));
+  return res.QueueUrl!;
+}
+
 export interface QueueUrls {
   queueUrl: string;
   dlqUrl: string;

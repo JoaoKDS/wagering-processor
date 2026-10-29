@@ -2,6 +2,7 @@ import type { MikroORM } from "@mikro-orm/postgresql";
 import { DomainError } from "../../shared/domain-error";
 import { FailureCode } from "../../shared/failure-code";
 import { applyReversal } from "./submit-wager-transaction";
+import { metrics } from "../../shared/metrics";
 import {
   type Conn,
   type WagerTxRow,
@@ -114,6 +115,8 @@ export async function reprocessPendingReferences(
     }
   });
 
+  metrics.inc("pending_reference_processed_total", {}, stats.processed);
+  metrics.inc("pending_reference_rejected_total", {}, stats.rejected);
   return stats;
 }
 

@@ -1,5 +1,6 @@
 import type { MikroORM } from "@mikro-orm/postgresql";
 import { query, run, transactionConn } from "../wagering/infrastructure/ledger-store";
+import { metrics } from "../shared/metrics";
 
 export interface OutboxEvent {
   id: string;
@@ -51,7 +52,10 @@ export class OutboxPublisher {
           await this.bus.publish(event);
           await run(conn, "UPDATE outbox_messages SET published_at = now(), attempts = attempts + 1 WHERE id = ?", [event.id]);
           published += 1;
+          metrics.inc("outbox_published_total", { event_type: event.event_type });
+          metrics.observe("outbox_publish_latency_ms", Date.now() - event.occurred_at.getTime());
         } catch {
+          metrics.inc("outbox_publish_errors_total");
           // backoff exponencial limitado a 5 minutos
           await run(
             conn,

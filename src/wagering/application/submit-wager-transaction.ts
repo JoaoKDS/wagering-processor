@@ -1,6 +1,7 @@
 import type { MikroORM } from "@mikro-orm/postgresql";
 import { randomUUID } from "node:crypto";
 import { DomainError } from "../../shared/domain-error";
+import { metrics } from "../../shared/metrics";
 import { FailureCode } from "../../shared/failure-code";
 import { Money, type MoneyProps } from "../../shared/money";
 import { LedgerDirection, WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
@@ -115,7 +116,10 @@ export class SubmitWagerTransaction {
            RETURNING message_id`,
           [messageId, payloadHash, now, now],
         );
-        if (fresh.length === 0) return "DUPLICATE" as const;
+        if (fresh.length === 0) {
+          metrics.inc("inbox_duplicates_total");
+          return "DUPLICATE" as const;
+        }
       }
       return this.apply(conn, input.idempotencyKey, payload, payloadHash, now);
     });
@@ -214,6 +218,9 @@ export class SubmitWagerTransaction {
         failureCode: txn.failureCode ?? null,
       },
     });
+
+    // Contado antes do commit: aceitável para métrica operacional, e o status é o que foi decidido.
+    metrics.inc("wager_transactions_total", { status: txn.status, kind: txn.kind });
 
     return {
       transactionId: txn.id,

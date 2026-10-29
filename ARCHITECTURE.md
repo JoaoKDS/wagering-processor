@@ -102,8 +102,10 @@ Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído
 ## Limitações conhecidas
 
 - **Autenticação não implementada.** Desenho: Keycloak ou Zitadel na frente da API; `ProviderIdentityPort` como ponto de extensão.
-- **Sem métricas nem logs estruturados completos.** Há logs JSON nos pontos de erro e de ciclo do worker. Métricas (transações por status, duplicatas, retries, DLQ, outbox lag) ficaram para depois.
-- **Publisher do outbox não está ligado ao SQS.** Existe a classe `OutboxPublisher`, mas o processo `worker` ainda não a inicia. Os eventos ficam gravados na tabela.
+- **Métricas em memória por processo.** `GET /metrics` (API) e o worker têm registros separados. Em produção, o Prometheus raspa cada instância e agrega. Não há histograma de latência com buckets, só contagem, soma e máximo.
+- **Métricas contadas antes do commit.** Uma transação que falha ao commitar ainda é contada. Aceitável para monitoramento operacional, mas não para contabilidade.
+- **Entrega de eventos at-least-once.** A fila de eventos é padrão (não FIFO). Consumidores de eventos devem deduplicar pelo `eventId`.
+- **Latência do outbox medida pela idade do evento** (`occurred_at` até a publicação), não pelo tempo de fila no SQS.
 - **Eventos sem classes `IntegrationEvent`.** O payload é JSON montado nos casos de uso. Tipagem por classe é um ajuste pendente.
 - **Reversão parcial fora de escopo**, conforme a spec.
 - **Uma moeda (BRL) nos testes.** O modelo é multi-moeda, e os conflitos de moeda são testados no domínio.

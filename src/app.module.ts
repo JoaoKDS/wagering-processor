@@ -8,6 +8,7 @@ import { WalletQueries } from "./wallet/application/wallet-queries";
 import { WalletsController } from "./http/wallets.controller";
 import { WageringController } from "./http/wagering.controller";
 import { HealthController } from "./http/health.controller";
+import { MetricsController } from "./http/metrics.controller";
 import type { MikroORM } from "@mikro-orm/postgresql";
 
 function databaseUrl(): string {
@@ -28,7 +29,7 @@ const providers: Provider[] = [
 ];
 
 @Module({
-  controllers: [WalletsController, WageringController, HealthController],
+  controllers: [WalletsController, WageringController, HealthController, MetricsController],
   providers,
 })
 export class AppModule {}

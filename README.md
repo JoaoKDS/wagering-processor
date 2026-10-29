@@ -25,7 +25,7 @@ O compose sobe PostgreSQL na porta **5433** e LocalStack (SQS) na porta **4566**
 | `DATABASE_URL` | banco da aplicação | `postgres://postgres:postgres@localhost:5433/wagering` |
 | `TEST_DATABASE_URL` | banco dos testes (recriado a cada execução) | `postgres://postgres:postgres@localhost:5433/wagering_test` |
 | `SQS_ENDPOINT` | endpoint do SQS (LocalStack) | `http://localhost:4566` |
-| `SQS_QUEUE_URL` / `SQS_DLQ_URL` | URLs das filas (saída de `queues:create`) | |
+| `SQS_QUEUE_URL` / `SQS_DLQ_URL` / `SQS_EVENTS_URL` | URLs das filas (saída de `queues:create`) | |
 | `PORT` | porta da API (padrão 3000) | `3000` |
 
 ## Comandos
@@ -58,6 +58,7 @@ docker compose exec postgres psql -U postgres -c "CREATE DATABASE wagering_test"
 | POST | `/wagering/transactions` | submete transação (exige `Idempotency-Key`) |
 | GET | `/wagering/transactions/:id` | consulta por id interno |
 | GET | `/providers/:p/wagering/transactions/:ext` | consulta por id do provedor |
+| GET | `/metrics` | métricas no formato Prometheus (sem autenticação) |
 | GET | `/health/live` | processo vivo (sem autenticação) |
 | GET | `/health/ready` | PostgreSQL alcançável |
 

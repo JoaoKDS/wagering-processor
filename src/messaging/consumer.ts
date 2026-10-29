@@ -6,6 +6,8 @@ import {
 } from "@aws-sdk/client-sqs";
 import type { MoneyProps } from "../shared/money";
 import { toHttpException } from "../http/errors";
+import { metrics } from "../shared/metrics";
+import { log } from "../shared/logger";
 import type { SubmitInput, SubmitWagerTransaction } from "../wagering/application/submit-wager-transaction";
 
 export interface ConsumerDeps {
@@ -57,12 +59,25 @@ export async function pollOnce(deps: ConsumerDeps, waitSeconds = 1): Promise<Pol
     try {
       const envelope = parseEnvelope(body);
       const outcome = await deps.submit.executeFromQueue(toSubmitInput(envelope), envelope.messageId);
-      if (outcome === "DUPLICATE") stats.duplicates++;
-      else stats.processed++;
+      if (outcome === "DUPLICATE") {
+        stats.duplicates++;
+        metrics.inc("sqs_duplicates_total");
+      } else {
+        stats.processed++;
+        metrics.inc("sqs_processed_total");
+      }
+      log("info", "sqs_message", {
+        messageId: envelope.messageId,
+        providerId: envelope.data.providerId,
+        walletId: envelope.data.walletId,
+        outcome: outcome === "DUPLICATE" ? "DUPLICATE" : outcome.status,
+      });
       await ack(deps, receipt);
     } catch (err) {
       if (isTransient(err)) {
         stats.deferred++; // sem ack: a mensagem volta depois da visibilidade
+        metrics.inc("sqs_retries_total");
+        log("warn", "sqs_deferred", { messageId: msg.MessageId, reason: (err as Error).message });
         continue;
       }
       await deps.sqs.send(
@@ -74,6 +89,8 @@ export async function pollOnce(deps: ConsumerDeps, waitSeconds = 1): Promise<Pol
         }),
       );
       stats.deadLettered++;
+      metrics.inc("sqs_dlq_total");
+      log("error", "sqs_dead_lettered", { messageId: msg.MessageId, reason: (err as Error).message });
       await ack(deps, receipt);
     }
   }

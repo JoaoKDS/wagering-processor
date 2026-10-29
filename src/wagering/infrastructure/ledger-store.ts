@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { metrics } from "../../shared/metrics";
 import { Money } from "../../shared/money";
 import { Wallet } from "../../wallet/domain/wallet";
 import type { WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
@@ -75,7 +76,10 @@ export interface WagerTxRow {
 
 /** Trava a linha da carteira até o fim da transação. Lock por walletId: nunca global. */
 export async function lockWallet(conn: Conn, walletId: string): Promise<WalletRow | undefined> {
+  // Mede o tempo de espera pelo lock: é o indicador de contenção por carteira (hot wallet).
+  const started = performance.now();
   const rows = await query<WalletRow>(conn, "SELECT * FROM wallets WHERE id = ? FOR UPDATE", [walletId]);
+  metrics.observe("wallet_lock_wait_ms", performance.now() - started);
   return rows[0];
 }
 

@@ -85,7 +85,15 @@ export class WalletQueries {
     };
   }
 
-  /** Readiness: alcança o PostgreSQL. (SQS entra na parte 3B.) */
+  /** Idade, em segundos, do evento de outbox mais antigo ainda não publicado. 0 se a fila está vazia. */
+  async outboxLagSeconds(): Promise<number> {
+    const rows = await this.db.execute<{ lag: string | null }[]>(
+      "SELECT EXTRACT(EPOCH FROM (now() - min(occurred_at)))::text AS lag FROM outbox_messages WHERE published_at IS NULL",
+    );
+    return Number(rows[0]?.lag ?? 0) || 0;
+  }
+
+  /** Readiness: alcança o PostgreSQL. */
   async ping(): Promise<boolean> {
     try {
       await this.db.execute("SELECT 1");
