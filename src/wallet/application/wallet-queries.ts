@@ -238,9 +238,10 @@ function encodeCursor(version: number): string {
 }
 
 function decodeCursor(cursor: string): number {
-  const value = Number(Buffer.from(cursor, "base64url").toString("utf8"));
-  if (!Number.isInteger(value) || value < 0) {
+  // Só aceita base64url que decodifica para dígitos. Sem isso, "%%%" vira "" e depois 0.
+  const text = Buffer.from(cursor, "base64url").toString("utf8");
+  if (!/^\d+$/.test(text)) {
     throw new Error("cursor inválido");
   }
-  return value;
+  return Number(text);
 }
