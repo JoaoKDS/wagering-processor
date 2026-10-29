@@ -88,7 +88,8 @@ export class SubmitWagerTransaction {
     const payloadHash = WagerTransaction.computePayloadHash(payload);
 
     return this.orm.em.fork().transactional(async (tx) =>
-      this.apply(tx.getConnection(), input.idempotencyKey, payload, payloadHash, this.clock()),
+      // getKnex() devolve a conexão DA transação; getConnection() não estaria no BEGIN
+      this.apply(tx.getKnex() as unknown as Conn, input.idempotencyKey, payload, payloadHash, this.clock()),
     );
   }
 

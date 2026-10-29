@@ -1,4 +1,5 @@
 import type { MikroORM } from "@mikro-orm/postgresql";
+import { type Conn, query, run } from "../wagering/infrastructure/ledger-store";
 
 export interface OutboxEvent {
   id: string;
@@ -31,8 +32,10 @@ export class OutboxPublisher {
   /** Publica um lote. Devolve quantos eventos foram publicados com sucesso. */
   async publishBatch(): Promise<number> {
     return this.orm.em.fork().transactional(async (tx) => {
-      const conn = tx.getConnection();
-      const events = await conn.execute<OutboxEvent[]>(
+      // conexão DA transação: sem isso o FOR UPDATE SKIP LOCKED não segura nada
+      const conn = tx.getKnex() as unknown as Conn;
+      const events = await query<OutboxEvent>(
+        conn,
         `SELECT id, aggregate_id, event_type, payload, occurred_at, attempts
            FROM outbox_messages
           WHERE published_at IS NULL AND next_attempt_at <= now()
@@ -46,21 +49,17 @@ export class OutboxPublisher {
       for (const event of events) {
         try {
           await this.bus.publish(event);
-          await conn.execute(
-            "UPDATE outbox_messages SET published_at = now(), attempts = attempts + 1 WHERE id = ?",
-            [event.id],
-            "run",
-          );
+          await run(conn, "UPDATE outbox_messages SET published_at = now(), attempts = attempts + 1 WHERE id = ?", [event.id]);
           published += 1;
         } catch {
           // backoff exponencial limitado a 5 minutos
-          await conn.execute(
+          await run(
+            conn,
             `UPDATE outbox_messages
                 SET attempts = attempts + 1,
                     next_attempt_at = now() + make_interval(secs => LEAST(power(2, attempts + 1), 300))
               WHERE id = ?`,
             [event.id],
-            "run",
           );
         }
       }

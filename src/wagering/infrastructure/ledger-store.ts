@@ -1,4 +1,3 @@
-import type { AbstractSqlConnection } from "@mikro-orm/postgresql";
 import { randomUUID } from "node:crypto";
 import { Money } from "../../shared/money";
 import { Wallet } from "../../wallet/domain/wallet";
@@ -11,13 +10,26 @@ import {
 import type { FailureCode } from "../../shared/failure-code";
 
 /**
- * Acesso ao banco dentro de uma transação. Todas as funções recebem a MESMA conexão
- * da transação, então wallet, lançamento, transação e outbox entram no mesmo commit.
+ * Conexão DENTRO de uma transação. Vem de `em.transactional(...)` via `tx.getKnex()`.
  *
- * O SQL fica explícito de propósito: as regras de lock, de idempotência e de ledger
- * precisam ser legíveis e auditáveis, não escondidas atrás de um mapeamento de entidade.
+ * Atenção: NÃO usar `em.getConnection()` dentro de transactional. Essa conexão não está
+ * ligada ao BEGIN, então cada query roda em autocommit e o lock FOR UPDATE é liberado na hora.
+ * Foi exatamente o bug que os testes de concorrência pegaram.
  */
-export type Conn = AbstractSqlConnection;
+export interface Conn {
+  raw(sql: string, bindings?: unknown[]): Promise<{ rows?: unknown[] }>;
+}
+
+/** SELECT ou UPDATE ... RETURNING: devolve as linhas. */
+export async function query<T>(conn: Conn, sql: string, params: unknown[] = []): Promise<T[]> {
+  const result = await conn.raw(sql, params);
+  return (result.rows ?? []) as T[];
+}
+
+/** INSERT ou UPDATE sem retorno. */
+export async function run(conn: Conn, sql: string, params: unknown[] = []): Promise<void> {
+  await conn.raw(sql, params);
+}
 
 export interface WalletRow {
   id: string;
@@ -53,18 +65,12 @@ export interface WagerTxRow {
 
 /** Trava a linha da carteira até o fim da transação. Lock por walletId: nunca global. */
 export async function lockWallet(conn: Conn, walletId: string): Promise<WalletRow | undefined> {
-  const rows = await conn.execute<WalletRow[]>(
-    "SELECT * FROM wallets WHERE id = ? FOR UPDATE",
-    [walletId],
-  );
+  const rows = await query<WalletRow>(conn, "SELECT * FROM wallets WHERE id = ? FOR UPDATE", [walletId]);
   return rows[0];
 }
 
 export async function findByIdempotencyKey(conn: Conn, key: string): Promise<WagerTxRow | undefined> {
-  const rows = await conn.execute<WagerTxRow[]>(
-    "SELECT * FROM wager_transactions WHERE idempotency_key = ?",
-    [key],
-  );
+  const rows = await query<WagerTxRow>(conn, "SELECT * FROM wager_transactions WHERE idempotency_key = ?", [key]);
   return rows[0];
 }
 
@@ -73,7 +79,8 @@ export async function findByExternalId(
   providerId: string,
   externalTransactionId: string,
 ): Promise<WagerTxRow | undefined> {
-  const rows = await conn.execute<WagerTxRow[]>(
+  const rows = await query<WagerTxRow>(
+    conn,
     "SELECT * FROM wager_transactions WHERE provider_id = ? AND external_transaction_id = ?",
     [providerId, externalTransactionId],
   );
@@ -82,7 +89,8 @@ export async function findByExternalId(
 
 /** Já existe uma reversão PROCESSED do mesmo tipo sobre esta referência? */
 export async function hasProcessedReversal(conn: Conn, referenceId: string, kind: string): Promise<boolean> {
-  const rows = await conn.execute<{ n: number }[]>(
+  const rows = await query<{ n: number }>(
+    conn,
     `SELECT 1 AS n FROM wager_transactions
       WHERE reference_transaction_id = ? AND kind = ? AND status = 'PROCESSED' LIMIT 1`,
     [referenceId, kind],
@@ -125,7 +133,8 @@ export function txFromRow(row: WagerTxRow): WagerTransaction {
 }
 
 export async function insertTransaction(conn: Conn, tx: WagerTransaction, balanceObserved: Money): Promise<void> {
-  await conn.execute(
+  await run(
+    conn,
     `INSERT INTO wager_transactions (
        id, provider_id, external_transaction_id, idempotency_key, payload_hash,
        wallet_id, player_id, round_id, game_id, kind, amount_minor, currency,
@@ -153,7 +162,6 @@ export async function insertTransaction(conn: Conn, tx: WagerTransaction, balanc
       tx.processedAt ?? null,
       balanceObserved.toMinor().toString(),
     ],
-    "run",
   );
 }
 
@@ -162,18 +170,13 @@ export async function insertTransaction(conn: Conn, tx: WagerTransaction, balanc
  * com o lock já adquirido isto nunca deveria falhar, mas se falhar, a transação aborta.
  */
 export async function updateWallet(conn: Conn, wallet: Wallet, previousVersion: number): Promise<void> {
-  const rows = await conn.execute<{ id: string }[]>(
+  const rows = await query<{ id: string }>(
+    conn,
     `UPDATE wallets
         SET balance_minor = ?, version = ?, updated_at = ?
       WHERE id = ? AND version = ?
       RETURNING id`,
-    [
-      wallet.balance.toMinor().toString(),
-      wallet.version,
-      wallet.updatedAt,
-      wallet.id,
-      previousVersion,
-    ],
+    [wallet.balance.toMinor().toString(), wallet.version, wallet.updatedAt, wallet.id, previousVersion],
   );
   if (rows.length !== 1) {
     throw new Error(`concorrência na wallet ${wallet.id}: versão esperada ${previousVersion}`);
@@ -181,7 +184,8 @@ export async function updateWallet(conn: Conn, wallet: Wallet, previousVersion: 
 }
 
 export async function insertLedger(conn: Conn, entry: WalletLedgerEntry, walletVersion: number): Promise<void> {
-  await conn.execute(
+  await run(
+    conn,
     `INSERT INTO wallet_ledger_entries (
        id, wallet_id, transaction_id, wallet_version, direction,
        amount_minor, currency, balance_before_minor, balance_after_minor, created_at
@@ -198,20 +202,19 @@ export async function insertLedger(conn: Conn, entry: WalletLedgerEntry, walletV
       entry.balanceAfter.toMinor().toString(),
       entry.createdAt,
     ],
-    "run",
   );
 }
 
 export interface OutboxRecord {
-  id: string;
   aggregateId: string;
   eventType: string;
   payload: Record<string, unknown>;
   occurredAt: Date;
 }
 
-export async function insertOutbox(conn: Conn, record: Omit<OutboxRecord, "id">): Promise<void> {
-  await conn.execute(
+export async function insertOutbox(conn: Conn, record: OutboxRecord): Promise<void> {
+  await run(
+    conn,
     `INSERT INTO outbox_messages (id, aggregate_id, event_type, payload, occurred_at, next_attempt_at)
      VALUES (?, ?, ?, ?::jsonb, ?, ?)`,
     [
@@ -222,6 +225,5 @@ export async function insertOutbox(conn: Conn, record: Omit<OutboxRecord, "id">)
       record.occurredAt,
       record.occurredAt,
     ],
-    "run",
   );
 }
