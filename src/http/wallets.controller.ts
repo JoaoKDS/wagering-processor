@@ -1,10 +1,12 @@
-import { Body, Controller, Get, HttpException, HttpStatus, Inject, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpException, HttpStatus, Inject, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { ProviderAuthGuard } from "../auth/provider-identity";
 import type { MoneyProps } from "../shared/money";
 import { CreateWallet } from "../wallet/application/create-wallet";
 import { WalletQueries } from "../wallet/application/wallet-queries";
 import { toHttpException } from "./errors";
 
 @Controller("wallets")
+@UseGuards(ProviderAuthGuard)
 export class WalletsController {
   constructor(
     @Inject(CreateWallet) private readonly createWallet: CreateWallet,

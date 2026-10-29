@@ -15,6 +15,8 @@ export interface ConsumerDeps {
   queueUrl: string;
   dlqUrl: string;
   submit: SubmitWagerTransaction;
+  /** Tempo, em segundos, que a mensagem fica invisível após o recebimento. Padrão 30. */
+  visibilityTimeout?: number;
 }
 
 export interface PollStats {
@@ -49,7 +51,7 @@ export async function pollOnce(deps: ConsumerDeps, waitSeconds = 1): Promise<Pol
       QueueUrl: deps.queueUrl,
       MaxNumberOfMessages: 10,
       WaitTimeSeconds: waitSeconds,
-      VisibilityTimeout: 30,
+      VisibilityTimeout: deps.visibilityTimeout ?? 30,
     }),
   );
 
@@ -67,6 +69,7 @@ export async function pollOnce(deps: ConsumerDeps, waitSeconds = 1): Promise<Pol
         metrics.inc("sqs_processed_total");
       }
       log("info", "sqs_message", {
+        correlationId: envelope.messageId,
         messageId: envelope.messageId,
         providerId: envelope.data.providerId,
         walletId: envelope.data.walletId,

@@ -3,6 +3,7 @@ import { SQL } from "bun";
 import { NestFactory } from "@nestjs/core";
 import type { INestApplication } from "@nestjs/common";
 import { runMigrations } from "../../scripts/migrate";
+import { createSqs, ensureEventsQueue } from "../../src/messaging/sqs-client";
 
 const url = process.env.TEST_DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/wagering_test";
 process.env.DATABASE_URL = url;
@@ -14,6 +15,11 @@ let base: string;
 beforeAll(async () => {
   sql = new SQL(url);
   await runMigrations(sql, "reset");
+  // /health/ready verifica o SQS: cria uma fila de teste e aponta a variável antes de montar o app
+  const setupSqs = createSqs();
+  process.env.SQS_QUEUE_URL = await ensureEventsQueue(setupSqs, `wager-http-${Date.now()}`);
+  setupSqs.destroy();
+
   const { AppModule } = await import("../../src/app.module");
   app = await NestFactory.create(AppModule, { logger: false });
   await app.listen(0, "127.0.0.1");

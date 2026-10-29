@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Headers, HttpException, HttpStatus, Inject, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpException, HttpStatus, Inject, Param, Post, Res, UseGuards } from "@nestjs/common";
+import { ProviderAuthGuard } from "../auth/provider-identity";
+import { log } from "../shared/logger";
 import { FAILURE_CATALOG, type FailureCode } from "../shared/failure-code";
 import {
   SubmitWagerTransaction,
@@ -29,6 +31,7 @@ function statusFor(result: SubmitResult): number {
 }
 
 @Controller()
+@UseGuards(ProviderAuthGuard)
 export class WageringController {
   constructor(
     @Inject(SubmitWagerTransaction) private readonly submit: SubmitWagerTransaction,
@@ -51,6 +54,14 @@ export class WageringController {
       const input = { ...(body as object), idempotencyKey } as SubmitInput;
       const result = await this.submit.execute(input);
       res.status(statusFor(result));
+      log("info", "http_submission", {
+        correlationId: idempotencyKey,
+        transactionId: result.transactionId,
+        providerId: (body as { providerId?: unknown }).providerId,
+        walletId: (body as { walletId?: unknown }).walletId,
+        outcome: result.status,
+        idempotentReplay: result.idempotentReplay,
+      });
       return {
         transactionId: result.transactionId,
         status: result.status,
