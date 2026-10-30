@@ -16,7 +16,7 @@ bun install
 docker compose up -d
 ```
 
-O compose sobe PostgreSQL na porta **5433** e LocalStack (SQS) na porta **4566**.
+O compose sobe PostgreSQL na porta **5433**, LocalStack (SQS) na porta **4566** e Keycloak na porta **8080**.
 
 ## Variáveis de ambiente
 
@@ -27,6 +27,11 @@ O compose sobe PostgreSQL na porta **5433** e LocalStack (SQS) na porta **4566**
 | `SQS_ENDPOINT` | endpoint do SQS (LocalStack) | `http://localhost:4566` |
 | `SQS_QUEUE_URL` / `SQS_DLQ_URL` / `SQS_EVENTS_URL` | URLs das filas (saída de `queues:create`) | |
 | `PORT` | porta da API (padrão 3000) | `3000` |
+| `AUTH_MODE` | `jwt` liga a validação do token do Keycloak; qualquer outro valor fica no modo de desenvolvimento | `jwt` |
+| `KEYCLOAK_ISSUER` | emissor esperado do token (exigido com `AUTH_MODE=jwt`) | `http://localhost:8080/realms/wagering` |
+| `KEYCLOAK_JWKS_URL` | chaves públicas do realm (exigido com `AUTH_MODE=jwt`) | `http://localhost:8080/realms/wagering/protocol/openid-connect/certs` |
+| `KEYCLOAK_AUDIENCE` | audiência esperada do token (padrão `wagering-api`) | `wagering-api` |
+| `KEYCLOAK_BASE_URL` | base do Keycloak para o teste de integração de autenticação (padrão `http://localhost:8080`) | |
 | `OTEL_ENABLED` | liga os traces OpenTelemetry (exporta para o console). Sem ele, a instrumentação fica desligada | `true` |
 
 ## Comandos
@@ -108,4 +113,12 @@ Cenários de concorrência e recuperação que estão nos testes de integração
 
 ## Autenticação
 
-Não implementada, conforme a seção 2 da spec. O desenho com Keycloak ou Zitadel está em `ARCHITECTURE.md`. O ponto de extensão é o `ProviderIdentityPort` (`src/auth/provider-identity.ts`), aplicado pelo `ProviderAuthGuard` em `POST /wagering/transactions`, nas consultas de transação e nas rotas de wallets. Health e métricas ficam abertos.
+Com Keycloak, conforme a seção 2 da spec. O realm `wagering` é importado de `keycloak/realm.json` ao subir o compose. Admin do Keycloak: `http://localhost:8080`, usuário `admin`, senha `admin`.
+
+- Com `AUTH_MODE=jwt`, o token `Bearer` é validado de verdade: assinatura pelo JWKS do realm, emissor, audiência (`wagering-api`) e expiração. O provedor vem do claim `provider_id`.
+- Sem `AUTH_MODE=jwt`, a API fica no modo de desenvolvimento e aceita qualquer requisição.
+- Com o token validado, o corpo (`providerId`) e a rota (`/providers/:providerId/...`) precisam bater com o provedor do token. Caso contrário, 403 `PROVIDER_MISMATCH`.
+- Usuário de teste: `provider-a` / `provider-a-secret` (realm `wagering`, cliente `wagering-api`).
+- Health e métricas ficam abertos.
+
+Para testar com Keycloak: `$env:AUTH_MODE="jwt"; $env:KEYCLOAK_ISSUER="http://localhost:8080/realms/wagering"; $env:KEYCLOAK_JWKS_URL="http://localhost:8080/realms/wagering/protocol/openid-connect/certs"`.

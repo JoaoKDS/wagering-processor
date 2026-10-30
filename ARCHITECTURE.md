@@ -100,6 +100,14 @@ Transição fora da tabela lança `InvalidTransactionStateError`, que é erro de
 
 `FAILED` existe no modelo e é terminal, mas nenhum caso de uso o produz hoje: falhas de infraestrutura geram erro transitório (5xx, sem ack), não `FAILED`. Está documentado como estado reservado para falha interna não recuperável.
 
+### 13. Autenticação com Keycloak
+
+A identidade do provedor fica atrás de `ProviderIdentityPort`. Com `AUTH_MODE=jwt`, a implementação `JwtProviderIdentity` valida o token `Bearer` com `jose`: assinatura pelo JWKS do realm, emissor, audiência e expiração. O provedor vem do claim `provider_id`, que o realm grava a partir do atributo do usuário.
+
+O guard (`ProviderAuthGuard`) aplica a regra da seção 2 do spec: o provedor autenticado só age sobre os próprios dados. Se o corpo (`providerId`) ou a rota (`/providers/:providerId/...`) citar outro provedor, a resposta é 403 `PROVIDER_MISMATCH`. Health e métricas ficam abertos.
+
+A validação é local: a API baixa o JWKS e checa a assinatura sem chamar o Keycloak a cada requisição. Testes em `auth.test.ts` usam o Keycloak real e cobrem token válido, ausência de header, esquema errado, token malformado, token forjado e audiência errada.
+
 ### 12. Partidas dobradas (diferencial)
 
 Cada lançamento de carteira tem uma perna de contrapartida em `house_ledger_entries`, com direção oposta, gravada na mesma transação. A inserção fica dentro de `insertLedger`, então todos os caminhos que gravam lançamento (submissão, referências pendentes, abertura de carteira) já cobrem a casa.
@@ -179,7 +187,7 @@ Leitura honesta: a contagem de conflitos só registra espera acima de 50 ms. Zer
 
 - **Pacote de traces depreciado.** `@opentelemetry/sdk-trace-base` aparece como depreciado no npm, substituído por `@opentelemetry/sdk-trace` (linha 2.x). A migração não foi feita porque a API da linha 2.x muda, e o código atual funciona com a 1.x.
 
-- **Autenticação não implementada.** Desenho: Keycloak ou Zitadel na frente da API; `ProviderIdentityPort` como ponto de extensão.
+- **Autenticação só vale com `AUTH_MODE=jwt`.** Por padrão a API aceita qualquer requisição, para facilitar o desenvolvimento. Em produção, o modo jwt deveria ser obrigatório. Também não há rotação de chaves nem revogação de token: o `jose` valida pelo JWKS e confia na expiração curta do token.
 - **Métricas em memória por processo.** `GET /metrics` (API) e o worker têm registros separados. Em produção, o Prometheus raspa cada instância e agrega. Não há histograma de latência com buckets, só contagem, soma e máximo.
 - **Métricas contadas antes do commit.** Uma transação que falha ao commitar ainda é contada. Aceitável para monitoramento operacional, mas não para contabilidade.
 - **Entrega de eventos at-least-once.** A fila de eventos é padrão (não FIFO). Consumidores de eventos devem deduplicar pelo `eventId`.
