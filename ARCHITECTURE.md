@@ -52,6 +52,10 @@ Eventos (`WalletBalanceChanged`, `WagerTransactionProcessed`, etc.) são gravado
 
 O publisher usa `FOR UPDATE SKIP LOCKED`: vários publishers podem rodar, cada um pegando lotes diferentes.
 
+Modelo de eventos (seção 11 do spec): cada evento é uma subclasse concreta de `IntegrationEvent<T>` (`src/shared/integration-event.ts` e `src/events/integration-events.ts`), com `eventId`, `eventType`, `version`, `aggregateId`, `correlationId`, `causationId` e `occurredAt` em ISO-8601. O `payload` gravado na outbox é o envelope completo, e é exatamente o corpo enviado ao SQS. `OutboxMessage` (`src/outbox/outbox-message.ts`) é a classe de domínio da mensagem da outbox, com `enqueue`, `isDue`, `markPublished` e `scheduleRetry`. `InboxMessage` (`src/messaging/inbox-message.ts`) é a classe de domínio do recebimento, e a inbox é gravada a partir dela.
+
+Limitação conhecida: o publisher aplica o backoff em SQL (`LEAST(power(2, attempts+1), 300)`), para que a decisão de quando publicar aconteça no banco. `OutboxMessage.scheduleRetry` implementa a mesma fórmula, e um teste unitário trava as duas em 2, 4 segundos e no teto de 5 minutos.
+
 ### 7. SQS: ack só depois do commit
 
 O consumidor trata três casos:

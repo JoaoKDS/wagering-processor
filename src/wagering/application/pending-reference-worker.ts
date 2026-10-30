@@ -4,6 +4,12 @@ import { FailureCode } from "../../shared/failure-code";
 import { applyReversal } from "./submit-wager-transaction";
 import { metrics } from "../../shared/metrics";
 import {
+  WagerTransactionProcessedEvent,
+  WagerTransactionRejectedEvent,
+  WalletBalanceChangedEvent,
+  type TransactionSnapshot,
+} from "../../events/integration-events";
+import {
   type Conn,
   type WagerTxRow,
   findByExternalId,
@@ -96,26 +102,11 @@ export async function reprocessPendingReferences(
           "UPDATE wager_transactions SET status = 'PROCESSED', reference_transaction_id = ?, processed_at = ? WHERE id = ?",
           [ref.id, now, row.id],
         );
-        await insertOutbox(conn, {
-          aggregateId: wallet.id,
-          eventType: "WalletBalanceChanged",
-          occurredAt: now,
-          payload: {
-            walletId: wallet.id,
-            transactionId: row.id,
-            direction: entry.direction,
-            money: entry.money.toJSON(),
-            balanceBefore: entry.balanceBefore.toJSON(),
-            balanceAfter: entry.balanceAfter.toJSON(),
-            walletVersion: wallet.version,
-          },
-        });
-        await insertOutbox(conn, {
-          aggregateId: row.id,
-          eventType: "WagerTransactionProcessed",
-          occurredAt: now,
-          payload: { transactionId: row.id, status: "PROCESSED" },
-        });
+        await insertOutbox(conn, WalletBalanceChangedEvent.from(entry, wallet.version, { correlationId: row.id, occurredAt: now }));
+        await insertOutbox(
+          conn,
+          WagerTransactionProcessedEvent.from(snapshotOf(row, "PROCESSED", null), { correlationId: row.id, occurredAt: now }),
+        );
         stats.processed++;
       } catch (err) {
         if (!(err instanceof DomainError)) throw err;
@@ -132,10 +123,21 @@ export async function reprocessPendingReferences(
 
 async function rejectPending(conn: Conn, row: WagerTxRow, code: FailureCode, now: Date): Promise<void> {
   await run(conn, "UPDATE wager_transactions SET status = 'REJECTED', failure_code = ? WHERE id = ?", [code, row.id]);
-  await insertOutbox(conn, {
-    aggregateId: row.id,
-    eventType: "WagerTransactionRejected",
-    occurredAt: now,
-    payload: { transactionId: row.id, status: "REJECTED", failureCode: code },
-  });
+  await insertOutbox(
+    conn,
+    WagerTransactionRejectedEvent.from(snapshotOf(row, "REJECTED", code), { correlationId: row.id, occurredAt: now }),
+  );
+}
+
+/** Estado da transação no formato usado pelos eventos, a partir da linha lida do banco. */
+function snapshotOf(row: WagerTxRow, status: string, failureCode: string | null): TransactionSnapshot {
+  return {
+    id: row.id,
+    providerId: row.provider_id,
+    externalTransactionId: row.external_transaction_id,
+    walletId: row.wallet_id,
+    kind: row.kind,
+    status,
+    failureCode,
+  };
 }

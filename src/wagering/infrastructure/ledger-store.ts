@@ -1,5 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { metrics } from "../../shared/metrics";
+import type { IntegrationEvent } from "../../shared/integration-event";
+import { OutboxMessage } from "../../outbox/outbox-message";
 import { Money } from "../../shared/money";
 import { Wallet } from "../../wallet/domain/wallet";
 import type { WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
@@ -222,25 +223,13 @@ export async function insertLedger(conn: Conn, entry: WalletLedgerEntry, walletV
   );
 }
 
-export interface OutboxRecord {
-  aggregateId: string;
-  eventType: string;
-  payload: Record<string, unknown>;
-  occurredAt: Date;
-}
-
-export async function insertOutbox(conn: Conn, record: OutboxRecord): Promise<void> {
+/** Grava o evento na outbox, na mesma transação SQL da alteração que o originou. */
+export async function insertOutbox(conn: Conn, event: IntegrationEvent<unknown>): Promise<void> {
+  const msg = OutboxMessage.enqueue(event);
   await run(
     conn,
     `INSERT INTO outbox_messages (id, aggregate_id, event_type, payload, occurred_at, next_attempt_at)
      VALUES (?, ?, ?, ?::jsonb, ?, ?)`,
-    [
-      randomUUID(),
-      record.aggregateId,
-      record.eventType,
-      JSON.stringify(record.payload),
-      record.occurredAt,
-      record.occurredAt,
-    ],
+    [msg.id, msg.aggregateId, msg.eventType, JSON.stringify(msg.payload), msg.occurredAt, msg.nextAttemptAt],
   );
 }

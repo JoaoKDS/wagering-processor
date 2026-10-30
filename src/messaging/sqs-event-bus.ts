@@ -15,13 +15,8 @@ export class SqsEventBus implements EventBus {
     await this.sqs.send(
       new SendMessageCommand({
         QueueUrl: this.queueUrl,
-        MessageBody: JSON.stringify({
-          eventId: event.id,
-          eventType: event.event_type,
-          aggregateId: event.aggregate_id,
-          occurredAt: event.occurred_at,
-          data: event.payload,
-        }),
+        // O payload gravado na outbox já é o envelope completo (IntegrationEnvelope).
+        MessageBody: JSON.stringify(event.payload),
       }),
     );
   }

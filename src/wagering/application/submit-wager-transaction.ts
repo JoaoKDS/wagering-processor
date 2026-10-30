@@ -7,6 +7,14 @@ import { Money, type MoneyProps } from "../../shared/money";
 import { LedgerDirection, WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
 import type { Wallet } from "../../wallet/domain/wallet";
 import {
+  WagerTransactionPendingReferenceEvent,
+  WagerTransactionProcessedEvent,
+  WagerTransactionRejectedEvent,
+  WalletBalanceChangedEvent,
+  type TransactionSnapshot,
+} from "../../events/integration-events";
+import { InboxMessage } from "../../messaging/inbox-message";
+import {
   WagerTransaction,
   WagerTransactionKind,
   WagerTransactionStatus,
@@ -73,6 +81,9 @@ export interface SubmitResult {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Nome do consumidor na inbox: a chave da deduplicação é (consumerName, messageId). */
+export const CONSUMER_NAME = "wager-consumer";
+
 /** Quais tipos de transação podem referenciar cada tipo. Spec, seção 7. */
 const ALLOWED_REFERENCE_KINDS: Partial<Record<WagerTransactionKind, WagerTransactionKind[]>> = {
   [WagerTransactionKind.Refund]: [WagerTransactionKind.Bet],
@@ -108,13 +119,19 @@ export class SubmitWagerTransaction {
     return this.orm.em.fork().transactional(async (tx) => {
       const conn = transactionConn(tx);
       if (messageId !== undefined) {
+        const inbox = InboxMessage.receive({
+          consumerName: CONSUMER_NAME,
+          messageId,
+          payloadHash,
+          receivedAt: now,
+        }).markProcessed(now);
         const fresh = await query<{ message_id: string }>(
           conn,
           `INSERT INTO inbox_messages (consumer_name, message_id, payload_hash, received_at, processed_at)
-           VALUES ('wager-consumer', ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?)
            ON CONFLICT DO NOTHING
            RETURNING message_id`,
-          [messageId, payloadHash, now, now],
+          [inbox.consumerName, inbox.messageId, inbox.payloadHash, inbox.receivedAt, inbox.processedAt],
         );
         if (fresh.length === 0) {
           metrics.inc("inbox_duplicates_total");
@@ -189,35 +206,13 @@ export class SubmitWagerTransaction {
     if (entry) {
       await updateWallet(conn, wallet, previousVersion);
       await insertLedger(conn, entry, wallet.version);
-      await insertOutbox(conn, {
-        aggregateId: wallet.id,
-        eventType: "WalletBalanceChanged",
-        occurredAt: now,
-        payload: {
-          walletId: wallet.id,
-          transactionId: txn.id,
-          direction: entry.direction,
-          money: entry.money.toJSON(),
-          balanceBefore: entry.balanceBefore.toJSON(),
-          balanceAfter: entry.balanceAfter.toJSON(),
-          walletVersion: wallet.version,
-        },
-      });
+      await insertOutbox(
+        conn,
+        WalletBalanceChangedEvent.from(entry, wallet.version, { correlationId: txn.id, occurredAt: now }),
+      );
     }
 
-    await insertOutbox(conn, {
-      aggregateId: txn.id,
-      eventType: eventTypeFor(txn.status),
-      occurredAt: now,
-      payload: {
-        transactionId: txn.id,
-        providerId: txn.providerId,
-        externalTransactionId: txn.externalTransactionId,
-        walletId: txn.walletId,
-        status: txn.status,
-        failureCode: txn.failureCode ?? null,
-      },
-    });
+    await insertOutbox(conn, transactionEvent(txn, now));
 
     // Contado antes do commit: aceitável para métrica operacional, e o status é o que foi decidido.
     metrics.inc("wager_transactions_total", { status: txn.status, kind: txn.kind });
@@ -302,12 +297,27 @@ function toPayload(input: SubmitInput): WagerPayload {
   return { ...input, kind: input.kind as WagerTransactionKind };
 }
 
-function eventTypeFor(status: WagerTransactionStatus): string {
-  switch (status) {
-    case WagerTransactionStatus.Processed: return "WagerTransactionProcessed";
-    case WagerTransactionStatus.Rejected: return "WagerTransactionRejected";
-    case WagerTransactionStatus.PendingReference: return "WagerTransactionPendingReference";
-    default: return "WagerTransactionFailed";
+/** Evento de integração do status decidido. Só PROCESSED, REJECTED e PENDING_REFERENCE geram evento (seção 11). */
+function transactionEvent(txn: WagerTransaction, occurredAt: Date) {
+  const snapshot: TransactionSnapshot = {
+    id: txn.id,
+    providerId: txn.providerId,
+    externalTransactionId: txn.externalTransactionId,
+    walletId: txn.walletId,
+    kind: txn.kind,
+    status: txn.status,
+    failureCode: txn.failureCode ?? null,
+  };
+  const meta = { correlationId: txn.id, occurredAt };
+  switch (txn.status) {
+    case WagerTransactionStatus.Processed:
+      return WagerTransactionProcessedEvent.from(snapshot, meta);
+    case WagerTransactionStatus.Rejected:
+      return WagerTransactionRejectedEvent.from(snapshot, meta);
+    case WagerTransactionStatus.PendingReference:
+      return WagerTransactionPendingReferenceEvent.from(snapshot, meta);
+    default:
+      throw new Error(`status ${txn.status} não gera evento de integração`);
   }
 }
 

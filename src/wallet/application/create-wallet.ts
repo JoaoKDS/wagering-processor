@@ -11,6 +11,7 @@ import {
   transactionConn,
 } from "../../wagering/infrastructure/ledger-store";
 import { InvalidSubmissionError } from "../../wagering/application/submit-wager-transaction";
+import { WalletBalanceChangedEvent } from "../../events/integration-events";
 
 export interface CreateWalletInput {
   playerId: string;
@@ -74,20 +75,10 @@ export class CreateWallet {
         opening.markProcessed(undefined, now);
         await insertTransaction(conn, opening, wallet.balance);
         await insertLedger(conn, openingEntry, wallet.version);
-        await insertOutbox(conn, {
-          aggregateId: wallet.id,
-          eventType: "WalletBalanceChanged",
-          occurredAt: now,
-          payload: {
-            walletId: wallet.id,
-            transactionId: openingTxId,
-            direction: openingEntry.direction,
-            money: openingEntry.money.toJSON(),
-            balanceBefore: openingEntry.balanceBefore.toJSON(),
-            balanceAfter: openingEntry.balanceAfter.toJSON(),
-            walletVersion: wallet.version,
-          },
-        });
+        await insertOutbox(
+          conn,
+          WalletBalanceChangedEvent.from(openingEntry, wallet.version, { correlationId: openingTxId, occurredAt: now }),
+        );
       }
 
       return {
