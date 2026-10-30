@@ -111,7 +111,17 @@ export class SubmitWagerTransaction {
     return this.run(input, messageId);
   }
 
+  /** Mede a latência de processamento de ponta a ponta (spec, seção 12). */
   private async run(input: SubmitInput, messageId: string | undefined): Promise<SubmitResult | "DUPLICATE"> {
+    const started = performance.now();
+    try {
+      return await this.runInner(input, messageId);
+    } finally {
+      metrics.observe("wager_processing_ms", performance.now() - started);
+    }
+  }
+
+  private async runInner(input: SubmitInput, messageId: string | undefined): Promise<SubmitResult | "DUPLICATE"> {
     const payload = toPayload(input);
     const payloadHash = WagerTransaction.computePayloadHash(payload);
     const now = this.clock();

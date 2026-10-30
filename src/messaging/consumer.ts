@@ -71,6 +71,7 @@ export async function pollOnce(deps: ConsumerDeps, waitSeconds = 1): Promise<Pol
       log("info", "sqs_message", {
         correlationId: envelope.messageId,
         messageId: envelope.messageId,
+        transactionId: outcome === "DUPLICATE" ? undefined : outcome.transactionId,
         providerId: envelope.data.providerId,
         walletId: envelope.data.walletId,
         outcome: outcome === "DUPLICATE" ? "DUPLICATE" : outcome.status,

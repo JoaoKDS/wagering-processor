@@ -88,6 +88,34 @@ Separamos `INSUFFICIENT_BALANCE` (aposta sem saldo) de `REVERSAL_WOULD_OVERDRAW`
 
 Todas as garantias de unicidade, imutabilidade e não-negatividade estão no schema, não só no código. Cada migration tem `up` e `down`, e cada uma roda numa transação.
 
+### 11. Estados e transições de `WagerTransaction`
+
+| De | Para |
+|---|---|
+| `PENDING` | `PENDING_REFERENCE`, `PROCESSED`, `REJECTED`, `FAILED` |
+| `PENDING_REFERENCE` | `PENDING_REFERENCE` (reavaliação), `PROCESSED`, `REJECTED`, `FAILED` |
+| `PROCESSED`, `REJECTED`, `FAILED` | nenhuma (terminais) |
+
+Transição fora da tabela lança `InvalidTransactionStateError`, que é erro de programação. `rehydrate` não revalida transições, porque reconstrói estado já persistido.
+
+`FAILED` existe no modelo e é terminal, mas nenhum caso de uso o produz hoje: falhas de infraestrutura geram erro transitório (5xx, sem ack), não `FAILED`. Está documentado como estado reservado para falha interna não recuperável.
+
+## Interpretações das regras
+
+Onde o spec deixou margem, estas são as escolhas:
+
+- **Hash do payload (`payloadHash`):** SHA-256 sobre JSON canônico (chaves ordenadas) de `providerId`, `externalTransactionId`, `playerId`, `walletId`, `roundId`, `gameId`, `kind`, `money` normalizado e `referenceExternalTransactionId` (`null` se ausente). Ficam de fora a `Idempotency-Key` e os metadados de transporte.
+- **Valor:** `BET`, `WIN`, `REFUND` e `ROLLBACK` exigem valor positivo. `LOSS` aceita zero, porque registra resultado sem mover saldo.
+- **`WIN` com referência:** é opcional e o valor é livre, porque é um crédito de ganho e não uma reversão. Só referencia `BET`.
+- **Reversão:** `REFUND` e `ROLLBACK` exigem o mesmo valor da referência. Reversão parcial está fora de escopo, e rejeita com `REFERENCE_AMOUNT_MISMATCH`.
+- **Direção do `ROLLBACK`:** inverte a direção da referência. Reverter uma `BET` gera crédito. Reverter um `WIN` ou um `REFUND` gera débito, e esse débito pode falhar com `REVERSAL_WOULD_OVERDRAW`.
+- **Jogador diferente do dono da carteira:** rejeitado com `INVALID_PAYLOAD`, auditável como `REJECTED`.
+- **Carteira inexistente:** 404, sem nada persistido, porque não há onde ancorar a transação.
+- **Mesma identidade externa com outra chave:** conflito (409), não replay.
+- **Replay idempotente:** devolve o saldo observado no momento original, guardado em `balance_observed_minor`.
+- **Ledger:** limite padrão de 50 entradas por página e máximo de 200. O cursor é opaco e validado.
+- **Reconciliação:** divergência gera log de erro, incrementa `wallet_reconciliation_mismatch_total` e aparece no campo `consistent: false`. Nunca corrige o saldo em silêncio.
+
 ## Testes
 
 | Suíte | Banco | SQS | Objetivo |
@@ -100,6 +128,12 @@ Todas as garantias de unicidade, imutabilidade e não-negatividade estão no sch
 | integration/http | PostgreSQL real | não | endpoints e códigos HTTP |
 | integration/pending-reference | PostgreSQL real | não | referência fora de ordem e TTL |
 | integration/sqs | PostgreSQL real | LocalStack real | consumidor, inbox, DLQ, dois consumidores |
+| integration/crash-recovery | PostgreSQL real | LocalStack real | worker morre depois do commit e antes do ack; redelivery não debita de novo |
+| integration/outbox-recovery | PostgreSQL real | não | publicador morre sem commit; outro publicador assume |
+| integration/multiprocess | PostgreSQL real | não | três processos reais na mesma carteira, com chaves sobrepostas; reinício com SIGKILL |
+| integration/invariants | PostgreSQL real | não | apostas concorrentes em 8 carteiras; saldo == ledger e version == última versão |
+| integration/http | PostgreSQL real | LocalStack real | endpoints, códigos HTTP, health ready com SQS |
+| unit/domain-messages | não | não | envelope do evento, fórmula de backoff da outbox, inbox |
 
 Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído pelo ledger.
 
@@ -110,7 +144,6 @@ Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído
 - **Métricas contadas antes do commit.** Uma transação que falha ao commitar ainda é contada. Aceitável para monitoramento operacional, mas não para contabilidade.
 - **Entrega de eventos at-least-once.** A fila de eventos é padrão (não FIFO). Consumidores de eventos devem deduplicar pelo `eventId`.
 - **Latência do outbox medida pela idade do evento** (`occurred_at` até a publicação), não pelo tempo de fila no SQS.
-- **Eventos sem classes `IntegrationEvent`.** O payload é JSON montado nos casos de uso. Tipagem por classe é um ajuste pendente.
 - **Reversão parcial fora de escopo**, conforme a spec.
 - **Uma moeda (BRL) nos testes.** O modelo é multi-moeda, e os conflitos de moeda são testados no domínio.
 - **Teste de carga não implementado.**

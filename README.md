@@ -60,7 +60,7 @@ docker compose exec postgres psql -U postgres -c "CREATE DATABASE wagering_test"
 | GET | `/providers/:p/wagering/transactions/:ext` | consulta por id do provedor |
 | GET | `/metrics` | métricas no formato Prometheus (sem autenticação) |
 | GET | `/health/live` | processo vivo (sem autenticação) |
-| GET | `/health/ready` | PostgreSQL alcançável |
+| GET | `/health/ready` | PostgreSQL e SQS alcançáveis (503 se qualquer um falhar) |
 
 ### Códigos de resposta de `POST /wagering/transactions`
 
@@ -74,6 +74,34 @@ docker compose exec postgres psql -U postgres -c "CREATE DATABASE wagering_test"
 | 409 | mesma `Idempotency-Key` com payload diferente | não reenviar; investigar |
 | 503 | falha transitória | reenviar |
 
+## Eventos publicados
+
+Gravados na outbox na mesma transação da alteração e publicados no SQS depois do commit. Todos seguem o envelope `IntegrationEvent` (`eventId`, `eventType`, `version`, `aggregateId`, `correlationId`, `causationId`, `occurredAt`, `data`).
+
+| Evento | Quando |
+|---|---|
+| `WalletBalanceChanged` | só quando o saldo muda (inclui OPENING) |
+| `WagerTransactionProcessed` | qualquer transação aplicada, inclusive LOSS |
+| `WagerTransactionRejected` | rejeição por regra de negócio, inclusive referência esgotada |
+| `WagerTransactionPendingReference` | referência ausente; transação aguarda |
+
+## Testes
+
+| Comando | O que prova |
+|---|---|
+| `bun run test:unit` | regras de domínio: Money, Wallet, transações, envelope, outbox, inbox |
+| `bun run test:integration` | PostgreSQL e LocalStack reais: constraints, concorrência, idempotência, outbox, SQS, DLQ, HTTP |
+
+Cenários de concorrência e recuperação que estão nos testes de integração:
+
+- **Mesma aposta 50 vezes em paralelo:** um único débito.
+- **Duas apostas de 80 com saldo de 100:** exatamente uma `PROCESSED`, e saldo final de 20.
+- **Três processos reais** na mesma carteira, com chaves sobrepostas (`multiprocess.test.ts`).
+- **Worker morto depois do commit e antes do ack** (`crash-recovery.test.ts`).
+- **Publicador morto antes de publicar** (`outbox-recovery.test.ts`).
+- **Reinício com SIGKILL** e reenvio das mesmas chaves, sem débito duplicado (`multiprocess.test.ts`).
+- **Invariante final em todos os testes:** saldo da carteira igual ao saldo reconstruído pelo ledger.
+
 ## Autenticação
 
-Não implementada, conforme a seção 2 da spec. O desenho com Keycloak ou Zitadel está em `ARCHITECTURE.md`, e o ponto de extensão é o `ProviderIdentityPort` (ainda não criado).
+Não implementada, conforme a seção 2 da spec. O desenho com Keycloak ou Zitadel está em `ARCHITECTURE.md`. O ponto de extensão é o `ProviderIdentityPort` (`src/auth/provider-identity.ts`), aplicado pelo `ProviderAuthGuard` em `POST /wagering/transactions`, nas consultas de transação e nas rotas de wallets. Health e métricas ficam abertos.
