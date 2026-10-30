@@ -27,6 +27,7 @@ O compose sobe PostgreSQL na porta **5433** e LocalStack (SQS) na porta **4566**
 | `SQS_ENDPOINT` | endpoint do SQS (LocalStack) | `http://localhost:4566` |
 | `SQS_QUEUE_URL` / `SQS_DLQ_URL` / `SQS_EVENTS_URL` | URLs das filas (saída de `queues:create`) | |
 | `PORT` | porta da API (padrão 3000) | `3000` |
+| `OTEL_ENABLED` | liga os traces OpenTelemetry (exporta para o console). Sem ele, a instrumentação fica desligada | `true` |
 
 ## Comandos
 

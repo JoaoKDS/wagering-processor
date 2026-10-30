@@ -137,6 +137,16 @@ Onde o spec deixou margem, estas são as escolhas:
 
 Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído pelo ledger.
 
+## Observabilidade
+
+Três sinais, todos sem dados sensíveis nem payloads financeiros completos:
+
+- **Logs** em JSON, com `correlationId`, `messageId`, `transactionId`, `walletId` e `providerId` quando existem.
+- **Métricas** em `GET /metrics` (formato Prometheus): transações por status, duplicatas, retries, DLQ, conflitos de lock, lag e latência da outbox, latência de processamento (`wager_processing_ms`) e divergências de reconciliação.
+- **Traces** com OpenTelemetry (`src/shared/tracing.ts`): cada submissão vira um span `wager.submit`, com `wager.provider_id`, `wager.wallet_id`, `wager.kind`, `wager.transaction_id`, `wager.status` e, quando vier da fila, `messaging.message_id`. Erros viram status ERROR com a exceção registrada.
+
+A API do OpenTelemetry fica no-op sem `OTEL_ENABLED=true`, então o custo é zero quando o recurso está desligado. Com o flag, os spans vão para o console, que é o exportador da demo. Exportação OTLP não está ligada: trocar o exportador é uma linha em `initTracing`, mas não foi testada contra um coletor.
+
 ## Resultados do teste de carga
 
 Ambiente: Windows 10, 6 CPUs, Bun 1.4.4, PostgreSQL em container (docker compose). Metodologia: submissão direta no caso de uso (sem HTTP e sem fila), 8 carteiras, concorrência 20, 2000 operações BET de 1.00 com chave única. Depois, a outbox é drenada com bus nulo.

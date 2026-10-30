@@ -6,6 +6,9 @@ import { OutboxPublisher } from "./outbox/outbox-publisher";
 import { SubmitWagerTransaction } from "./wagering/application/submit-wager-transaction";
 import { reprocessPendingReferences } from "./wagering/application/pending-reference-worker";
 import { log } from "./shared/logger";
+import { initTracing } from "./shared/tracing";
+
+initTracing();
 
 /**
  * Processo de background: consumidor SQS, publicação do outbox e worker de referências pendentes.

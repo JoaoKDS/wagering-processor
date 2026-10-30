@@ -2,6 +2,7 @@ import type { MikroORM } from "@mikro-orm/postgresql";
 import { randomUUID } from "node:crypto";
 import { DomainError } from "../../shared/domain-error";
 import { metrics } from "../../shared/metrics";
+import { withSpan } from "../../shared/tracing";
 import { FailureCode } from "../../shared/failure-code";
 import { Money, type MoneyProps } from "../../shared/money";
 import { LedgerDirection, WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
@@ -115,7 +116,25 @@ export class SubmitWagerTransaction {
   private async run(input: SubmitInput, messageId: string | undefined): Promise<SubmitResult | "DUPLICATE"> {
     const started = performance.now();
     try {
-      return await this.runInner(input, messageId);
+      return await withSpan(
+        "wager.submit",
+        {
+          "wager.provider_id": input.providerId,
+          "wager.wallet_id": input.walletId,
+          "wager.kind": input.kind,
+          ...(messageId ? { "messaging.message_id": messageId } : {}),
+        },
+        async (span) => {
+          const outcome = await this.runInner(input, messageId);
+          if (outcome === "DUPLICATE") {
+            span.setAttribute("wager.duplicate", true);
+          } else {
+            span.setAttribute("wager.transaction_id", outcome.transactionId);
+            span.setAttribute("wager.status", outcome.status);
+          }
+          return outcome;
+        },
+      );
     } finally {
       metrics.observe("wager_processing_ms", performance.now() - started);
     }
