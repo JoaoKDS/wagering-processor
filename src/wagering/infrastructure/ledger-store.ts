@@ -1,9 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { metrics } from "../../shared/metrics";
 import type { IntegrationEvent } from "../../shared/integration-event";
 import { OutboxMessage } from "../../outbox/outbox-message";
 import { Money } from "../../shared/money";
 import { Wallet } from "../../wallet/domain/wallet";
-import type { WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
+import { LedgerDirection, type WalletLedgerEntry } from "../../wallet/domain/wallet-ledger-entry";
 import {
   WagerTransaction,
   WagerTransactionKind,
@@ -218,6 +219,23 @@ export async function insertLedger(conn: Conn, entry: WalletLedgerEntry, walletV
       entry.money.currency,
       entry.balanceBefore.toMinor().toString(),
       entry.balanceAfter.toMinor().toString(),
+      entry.createdAt,
+    ],
+  );
+
+  // Partida dobrada: a perna da casa é a contrapartida, com direção oposta, no mesmo commit.
+  const houseDirection = entry.direction === LedgerDirection.Credit ? "DEBIT" : "CREDIT";
+  await run(
+    conn,
+    `INSERT INTO house_ledger_entries (id, wallet_ledger_entry_id, transaction_id, direction, amount_minor, currency, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      randomUUID(),
+      entry.id,
+      entry.transactionId,
+      houseDirection,
+      entry.money.toMinor().toString(),
+      entry.money.currency,
       entry.createdAt,
     ],
   );

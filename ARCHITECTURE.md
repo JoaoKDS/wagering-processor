@@ -100,6 +100,16 @@ Transição fora da tabela lança `InvalidTransactionStateError`, que é erro de
 
 `FAILED` existe no modelo e é terminal, mas nenhum caso de uso o produz hoje: falhas de infraestrutura geram erro transitório (5xx, sem ack), não `FAILED`. Está documentado como estado reservado para falha interna não recuperável.
 
+### 12. Partidas dobradas (diferencial)
+
+Cada lançamento de carteira tem uma perna de contrapartida em `house_ledger_entries`, com direção oposta, gravada na mesma transação. A inserção fica dentro de `insertLedger`, então todos os caminhos que gravam lançamento (submissão, referências pendentes, abertura de carteira) já cobrem a casa.
+
+A casa não é uma wallet: não tem `CHECK` de saldo, porque ela paga os ganhos e pode ficar negativa. A tabela é append-only, com o mesmo trigger do ledger da carteira.
+
+Invariantes testadas em `double-entry.test.ts`: cada transação soma zero entre as pernas da carteira e as da casa, há exatamente uma perna da casa por perna da carteira, e o saldo da casa é igual ao negativo da soma das carteiras.
+
+Limitação: a casa é uma conta única por moeda, sem conciliação com caixa externo nem com banco.
+
 ## Interpretações das regras
 
 Onde o spec deixou margem, estas são as escolhas:
@@ -133,6 +143,7 @@ Onde o spec deixou margem, estas são as escolhas:
 | integration/multiprocess | PostgreSQL real | não | três processos reais na mesma carteira, com chaves sobrepostas; reinício com SIGKILL |
 | integration/invariants | PostgreSQL real | não | apostas concorrentes em 8 carteiras; saldo == ledger e version == última versão |
 | integration/http | PostgreSQL real | LocalStack real | endpoints, códigos HTTP, health ready com SQS |
+| integration/double-entry | PostgreSQL real | não | pernas da casa somam zero com as da carteira; append-only |
 | unit/domain-messages | não | não | envelope do evento, fórmula de backoff da outbox, inbox |
 
 Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído pelo ledger.
@@ -165,6 +176,8 @@ Ambiente: Windows 10, 6 CPUs, Bun 1.4.4, PostgreSQL em container (docker compose
 Leitura honesta: a contagem de conflitos só registra espera acima de 50 ms. Zero conflitos significa que nenhuma espera passou desse limite, não que não houve disputa pela carteira. Medição feita em um único processo; o cenário com três processos está coberto pelo teste `multiprocess`, mas sem medição de carga.
 
 ## Limitações conhecidas
+
+- **Pacote de traces depreciado.** `@opentelemetry/sdk-trace-base` aparece como depreciado no npm, substituído por `@opentelemetry/sdk-trace` (linha 2.x). A migração não foi feita porque a API da linha 2.x muda, e o código atual funciona com a 1.x.
 
 - **Autenticação não implementada.** Desenho: Keycloak ou Zitadel na frente da API; `ProviderIdentityPort` como ponto de extensão.
 - **Métricas em memória por processo.** `GET /metrics` (API) e o worker têm registros separados. Em produção, o Prometheus raspa cada instância e agrega. Não há histograma de latência com buckets, só contagem, soma e máximo.
