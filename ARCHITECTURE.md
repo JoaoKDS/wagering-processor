@@ -137,6 +137,23 @@ Onde o spec deixou margem, estas são as escolhas:
 
 Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído pelo ledger.
 
+## Resultados do teste de carga
+
+Ambiente: Windows 10, 6 CPUs, Bun 1.4.4, PostgreSQL em container (docker compose). Metodologia: submissão direta no caso de uso (sem HTTP e sem fila), 8 carteiras, concorrência 20, 2000 operações BET de 1.00 com chave única. Depois, a outbox é drenada com bus nulo.
+
+| Medida | Resultado |
+|---|---|
+| Vazão de submissão | 593,75 transações/s (2000 em 3,37 s) |
+| Latência p50 / p95 / p99 / máx | 28,97 / 57,12 / 97,71 / 186,55 ms |
+| Status | 2000 PROCESSED, 0 REJECTED |
+| Taxa de erro | 0 |
+| Conflitos de lock (espera acima de 50 ms) | 0 |
+| Lag da outbox antes da drenagem | 3,44 s |
+| Vazão de publicação da outbox | 951,32 eventos/s (4008 eventos drenados) |
+| Invariante saldo == ledger | OK em todas as carteiras |
+
+Leitura honesta: a contagem de conflitos só registra espera acima de 50 ms. Zero conflitos significa que nenhuma espera passou desse limite, não que não houve disputa pela carteira. Medição feita em um único processo; o cenário com três processos está coberto pelo teste `multiprocess`, mas sem medição de carga.
+
 ## Limitações conhecidas
 
 - **Autenticação não implementada.** Desenho: Keycloak ou Zitadel na frente da API; `ProviderIdentityPort` como ponto de extensão.
@@ -146,4 +163,4 @@ Invariante verificada nos testes: saldo da carteira igual ao saldo reconstruído
 - **Latência do outbox medida pela idade do evento** (`occurred_at` até a publicação), não pelo tempo de fila no SQS.
 - **Reversão parcial fora de escopo**, conforme a spec.
 - **Uma moeda (BRL) nos testes.** O modelo é multi-moeda, e os conflitos de moeda são testados no domínio.
-- **Teste de carga não implementado.**
+- **Teste de carga é uma medição local.** O `bun run test:load` roda no próprio ambiente, com Postgres em container. Os números são de uma máquina e não viram meta: o spec não fixa RPS.

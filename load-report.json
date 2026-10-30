@@ -1,0 +1,35 @@
+{
+  "environment": {
+    "platform": "win32",
+    "release": "10.0.19045",
+    "cpus": 6,
+    "bun": "1.4.4",
+    "database": "PostgreSQL em container (docker compose)"
+  },
+  "methodology": "Submissão direta no caso de uso (sem HTTP e sem fila). BET de 1.00 com chave única, distribuída entre as carteiras. Latência medida por submissão. Depois, a outbox é drenada com bus nulo e o saldo é conferido contra o ledger.",
+  "config": {
+    "wallets": 8,
+    "concurrency": 20,
+    "operations": 2000
+  },
+  "throughputPerSec": 593.75,
+  "elapsedSeconds": 3.37,
+  "latencyMs": {
+    "p50": 28.97,
+    "p95": 57.12,
+    "p99": 97.71,
+    "max": 186.55
+  },
+  "statuses": {
+    "PROCESSED": 2000
+  },
+  "errors": 0,
+  "errorRate": 0,
+  "walletLockContended": 0,
+  "outbox": {
+    "lagSecondsBeforeDrain": 3.44,
+    "drainedEvents": 4008,
+    "drainThroughputPerSec": 951.32
+  },
+  "invariantsOk": true
+}

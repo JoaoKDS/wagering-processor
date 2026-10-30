@@ -91,6 +91,9 @@ Gravados na outbox na mesma transação da alteração e publicados no SQS depoi
 |---|---|
 | `bun run test:unit` | regras de domínio: Money, Wallet, transações, envelope, outbox, inbox |
 | `bun run test:integration` | PostgreSQL e LocalStack reais: constraints, concorrência, idempotência, outbox, SQS, DLQ, HTTP |
+| `bun run test:load` | teste de carga (diferencial): vazão, p50/p95/p99, erros, conflitos de lock, lag da outbox. Gera `load-report.json` |
+
+Para o teste de carga, crie antes o banco `wagering_load` (`docker compose exec postgres psql -U postgres -c "CREATE DATABASE wagering_load"`). Variáveis opcionais: `LOAD_DATABASE_URL`, `LOAD_WALLETS` (8), `LOAD_CONCURRENCY` (20), `LOAD_OPS` (2000), `LOAD_REPORT`.
 
 Cenários de concorrência e recuperação que estão nos testes de integração:
 
