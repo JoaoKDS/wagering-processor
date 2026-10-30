@@ -79,7 +79,10 @@ export async function lockWallet(conn: Conn, walletId: string): Promise<WalletRo
   // Mede o tempo de espera pelo lock: é o indicador de contenção por carteira (hot wallet).
   const started = performance.now();
   const rows = await query<WalletRow>(conn, "SELECT * FROM wallets WHERE id = ? FOR UPDATE", [walletId]);
-  metrics.observe("wallet_lock_wait_ms", performance.now() - started);
+  const waited = performance.now() - started;
+  metrics.observe("wallet_lock_wait_ms", waited);
+  // Espera acima de 50ms: a transação esperou outra pelo mesmo saldo (conflito de lock).
+  if (waited > 50) metrics.inc("wallet_lock_contended_total");
   return rows[0];
 }
 

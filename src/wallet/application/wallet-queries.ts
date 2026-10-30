@@ -1,6 +1,7 @@
 import type { MikroORM } from "@mikro-orm/postgresql";
 import type { MoneyProps } from "../../shared/money";
 import { Money } from "../../shared/money";
+import { metrics } from "../../shared/metrics";
 
 /**
  * Leituras fora de transação. Não tomam lock: retornam o último estado commitado.
@@ -72,7 +73,9 @@ export class WalletQueries {
 
     if (!consistent) {
       // Divergência é sinalizada, nunca corrigida em silêncio.
+      metrics.inc("wallet_reconciliation_mismatch_total");
       console.warn(JSON.stringify({ level: "error", event: "wallet_reconciliation_mismatch", walletId }));
+      metrics.inc("wallet_reconciliation_mismatch_total");
     }
 
     return {

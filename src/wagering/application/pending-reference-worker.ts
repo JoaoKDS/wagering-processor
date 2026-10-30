@@ -50,10 +50,11 @@ export async function reprocessPendingReferences(
       conn,
       `SELECT * FROM wager_transactions
         WHERE status = 'PENDING_REFERENCE'
+          AND (next_attempt_at IS NULL OR next_attempt_at <= CAST(? AS timestamptz))
         ORDER BY created_at
         LIMIT ?
         FOR UPDATE SKIP LOCKED`,
-      [PENDING_BATCH_SIZE],
+      [now, PENDING_BATCH_SIZE],
     );
 
     for (const row of rows) {
@@ -71,6 +72,15 @@ export async function reprocessPendingReferences(
           await rejectPending(conn, row, FailureCode.REFERENCE_NOT_FOUND, now);
           stats.rejected++;
         } else {
+          // Backoff exponencial por transação: 1s, 2s, 4s... limitado a 1h entre tentativas (seção 7.1).
+          await run(
+            conn,
+            `UPDATE wager_transactions
+                SET reference_attempts = reference_attempts + 1,
+                    next_attempt_at = CAST(? AS timestamptz) + (LEAST(power(2, reference_attempts), 3600) * interval '1 second')
+              WHERE id = ?`,
+            [now, row.id],
+          );
           stats.stillPending++;
         }
         continue;
